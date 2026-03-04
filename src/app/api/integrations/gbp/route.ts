@@ -6,7 +6,7 @@ import {
   HttpStatus,
   tryCatch,
   requireAuth,
-} from "@/error-handler";
+} from "@/lib/error-handler";
 
 /**
  * GET /api/integrations/gbp

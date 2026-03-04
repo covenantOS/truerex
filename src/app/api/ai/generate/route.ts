@@ -10,7 +10,7 @@ import {
   HttpStatus,
   tryCatch,
   validateRequired,
-} from "@/error-handler";
+} from "@/lib/error-handler";
 
 type ContentType = "review_response" | "blog_post" | "social_post" | "neighborhood";
 

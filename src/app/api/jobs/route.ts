@@ -5,7 +5,7 @@ import {
   HttpStatus,
   tryCatch,
   validateRequired,
-} from "@/error-handler";
+} from "@/lib/error-handler";
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 50;

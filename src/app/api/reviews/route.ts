@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import {
   ApiError,
   tryCatch,
-} from "@/error-handler";
+} from "@/lib/error-handler";
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 50;

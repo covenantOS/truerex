@@ -4,7 +4,7 @@ import {
   ApiError,
   HttpStatus,
   tryCatch,
-} from "@/error-handler";
+} from "@/lib/error-handler";
 
 /**
  * GET /api/jobs/[id]
