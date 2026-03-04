@@ -270,7 +270,7 @@ export function validateRequired(
  * Auth helper - verifies user is authenticated
  * Throws ApiError with 401 if not authenticated
  */
-export async function requireAuth(supabase: ReturnType<typeof import("@/lib/supabase/server").createClient>): Promise<string> {
+export async function requireAuth(supabase: Awaited<ReturnType<typeof import("@/lib/supabase/server").createClient>): Promise<string> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
