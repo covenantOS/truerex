@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useBusiness } from "@/hooks/use-business";
 import { Button } from "@/components/ui/button";
@@ -44,8 +44,8 @@ export default function SettingsPage() {
   const [autoRespondReviews, setAutoRespondReviews] = useState(false);
   const [reviewDelay, setReviewDelay] = useState("2");
 
-  // Initialize from business on load
-  useState(() => {
+  // Initialize from business when it loads
+  useEffect(() => {
     if (business) {
       setName(business.name);
       setServiceType(business.service_type);
@@ -64,7 +64,7 @@ export default function SettingsPage() {
       setAutoRespondReviews(business.auto_respond_reviews);
       setReviewDelay(business.review_request_delay_hours.toString());
     }
-  });
+  }, [business]);
 
   async function handleSave() {
     if (!business) return;

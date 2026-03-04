@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useBusiness } from "@/hooks/use-business";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,6 +28,14 @@ import {
   Mail,
   Camera,
   ArrowLeft,
+  Globe,
+  BookOpen,
+  Share2,
+  Star,
+  Megaphone,
+  Send,
+  CheckCircle2,
+  Clock,
 } from "lucide-react";
 
 interface JobPhoto {
@@ -52,6 +61,10 @@ interface Job {
   ai_story: string | null;
   ai_story_approved: boolean;
   status: string;
+  gbp_posted: boolean;
+  blog_posted: boolean;
+  review_requested: boolean;
+  neighborhood_campaign_sent: boolean;
   created_at: string;
   job_photos: JobPhoto[];
 }
@@ -59,12 +72,14 @@ interface Job {
 export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { business } = useBusiness();
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [editedStory, setEditedStory] = useState("");
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -133,6 +148,145 @@ export default function JobDetailPage() {
     setSaving(false);
   }
 
+  async function handleMarkComplete() {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("jobs")
+      .update({ status: "completed", completed_at: new Date().toISOString() })
+      .eq("id", id);
+
+    if (error) {
+      toast.error("Failed to update");
+    } else {
+      setJob((prev) => (prev ? { ...prev, status: "completed" } : prev));
+      toast.success("Job marked as completed!");
+    }
+  }
+
+  async function handlePostToGBP() {
+    if (!business || !job) return;
+    setActionLoading("gbp");
+
+    const supabase = createClient();
+    // Save to content_posts
+    const { error } = await supabase.from("content_posts").insert({
+      business_id: business.id,
+      job_id: job.id,
+      platform: "gbp",
+      content_type: "post",
+      title: job.title,
+      body: job.ai_story || "",
+      status: "published",
+      published_at: new Date().toISOString(),
+    });
+
+    if (!error) {
+      await supabase
+        .from("jobs")
+        .update({ gbp_posted: true })
+        .eq("id", id);
+      setJob((prev) => (prev ? { ...prev, gbp_posted: true } : prev));
+      toast.success("Posted to GBP!");
+    } else {
+      toast.error("Failed: " + error.message);
+    }
+    setActionLoading(null);
+  }
+
+  async function handleGenerateBlog() {
+    if (!business || !job) return;
+    setActionLoading("blog");
+
+    try {
+      const res = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "blog_post",
+          business_id: business.id,
+          job_id: job.id,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Blog generation failed");
+      const result = await res.json();
+
+      const supabase = createClient();
+      await supabase.from("content_posts").insert({
+        business_id: business.id,
+        job_id: job.id,
+        platform: "wordpress",
+        content_type: "blog",
+        title: result.title,
+        body: result.body,
+        status: "draft",
+      });
+
+      await supabase
+        .from("jobs")
+        .update({ blog_posted: true })
+        .eq("id", id);
+
+      setJob((prev) => (prev ? { ...prev, blog_posted: true } : prev));
+      toast.success("Blog post generated and saved as draft!");
+    } catch {
+      toast.error("Blog generation failed");
+    }
+    setActionLoading(null);
+  }
+
+  async function handleRequestReview() {
+    if (!job) return;
+    setActionLoading("review");
+
+    try {
+      const res = await fetch("/api/reviews/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_id: job.id }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        toast.error(err.error || "Failed to send review request");
+        setActionLoading(null);
+        return;
+      }
+
+      setJob((prev) => (prev ? { ...prev, review_requested: true } : prev));
+      toast.success("Review request sent!");
+    } catch {
+      toast.error("Failed to send");
+    }
+    setActionLoading(null);
+  }
+
+  async function handleCreateCampaign() {
+    if (!business || !job) return;
+    setActionLoading("campaign");
+
+    const supabase = createClient();
+    const { error } = await supabase.from("neighborhood_campaigns").insert({
+      business_id: business.id,
+      job_id: job.id,
+      campaign_type: "post_job",
+      radius_miles: 0.5,
+      status: "draft",
+    });
+
+    if (!error) {
+      await supabase
+        .from("jobs")
+        .update({ neighborhood_campaign_sent: true })
+        .eq("id", id);
+      setJob((prev) => (prev ? { ...prev, neighborhood_campaign_sent: true } : prev));
+      toast.success("Neighborhood campaign created! Go to Campaigns to configure.");
+    } else {
+      toast.error("Failed: " + error.message);
+    }
+    setActionLoading(null);
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -155,7 +309,7 @@ export default function JobDetailPage() {
         <Button variant="ghost" size="icon" onClick={() => router.back()}>
           <ArrowLeft className="w-4 h-4" />
         </Button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold">
             {job.title || SERVICE_TYPE_LABELS[job.service_type] || "Job"}
           </h1>
@@ -163,9 +317,22 @@ export default function JobDetailPage() {
             {new Date(job.created_at).toLocaleDateString()}
           </p>
         </div>
-        <Badge className="ml-auto" variant={job.status === "completed" ? "default" : "secondary"}>
-          {job.status}
-        </Badge>
+        <div className="flex items-center gap-2">
+          {job.status !== "completed" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleMarkComplete}
+              className="gap-1"
+            >
+              <CheckCircle2 className="w-3 h-3" />
+              Mark Complete
+            </Button>
+          )}
+          <Badge variant={job.status === "completed" ? "default" : "secondary"}>
+            {job.status}
+          </Badge>
+        </div>
       </div>
 
       {/* Job Info */}
@@ -229,10 +396,7 @@ export default function JobDetailPage() {
                       alt={photo.caption || photo.photo_type}
                       className="object-cover w-full h-full"
                     />
-                    <Badge
-                      className="absolute top-1 left-1 text-[10px]"
-                      variant="secondary"
-                    >
+                    <Badge className="absolute top-1 left-1 text-[10px]" variant="secondary">
                       {photo.photo_type}
                     </Badge>
                   </div>
@@ -254,7 +418,7 @@ export default function JobDetailPage() {
               ? job.ai_story_approved
                 ? "Approved and ready for publishing"
                 : "Review the story, edit if needed, then approve"
-              : "Generate a GBP post from the job notes"}
+              : "Generate a story from the job notes"}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -276,17 +440,8 @@ export default function JobDetailPage() {
               <div className="flex flex-wrap gap-2">
                 {!job.ai_story_approved && (
                   <>
-                    <Button
-                      size="sm"
-                      onClick={handleApprove}
-                      disabled={saving}
-                      className="gap-1"
-                    >
-                      {saving ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Check className="w-3 h-3" />
-                      )}
+                    <Button size="sm" onClick={handleApprove} disabled={saving} className="gap-1">
+                      {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
                       Approve
                     </Button>
                     <Button
@@ -308,11 +463,7 @@ export default function JobDetailPage() {
                   disabled={generating}
                   className="gap-1"
                 >
-                  {generating ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : (
-                    <RefreshCw className="w-3 h-3" />
-                  )}
+                  {generating ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                   Regenerate
                 </Button>
               </div>
@@ -323,47 +474,127 @@ export default function JobDetailPage() {
               disabled={generating || !job.raw_notes}
               className="gap-2"
             >
-              {generating ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Sparkles className="w-4 h-4" />
-              )}
+              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
               {generating ? "Generating..." : "Generate Story"}
             </Button>
           )}
         </CardContent>
       </Card>
 
-      {/* Content Pipeline Status */}
+      {/* Content Pipeline Actions */}
       {job.ai_story_approved && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Content Pipeline</CardTitle>
-            <CardDescription>Where this story has been published</CardDescription>
+            <CardDescription>Publish this story across your channels</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2 text-sm">
-              <div className="flex items-center justify-between">
-                <span>Google Business Profile</span>
-                <Badge variant={job.status === "completed" ? "outline" : "secondary"}>
-                  Ready
-                </Badge>
+            <div className="space-y-3">
+              {/* GBP */}
+              <div className="flex items-center justify-between py-2">
+                <div className="flex items-center gap-3">
+                  <Globe className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Google Business Profile</span>
+                </div>
+                {job.gbp_posted ? (
+                  <Badge className="bg-green-100 text-green-800">
+                    <CheckCircle2 className="w-3 h-3 mr-1" /> Posted
+                  </Badge>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handlePostToGBP}
+                    disabled={actionLoading === "gbp"}
+                    className="gap-1"
+                  >
+                    {actionLoading === "gbp" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                    Post
+                  </Button>
+                )}
               </div>
-              <div className="flex items-center justify-between">
-                <span>WordPress Blog</span>
-                <Badge variant="secondary">Phase 5</Badge>
+
+              <Separator />
+
+              {/* Blog */}
+              <div className="flex items-center justify-between py-2">
+                <div className="flex items-center gap-3">
+                  <BookOpen className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">WordPress Blog</span>
+                </div>
+                {job.blog_posted ? (
+                  <Badge className="bg-green-100 text-green-800">
+                    <CheckCircle2 className="w-3 h-3 mr-1" /> Draft Saved
+                  </Badge>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleGenerateBlog}
+                    disabled={actionLoading === "blog"}
+                    className="gap-1"
+                  >
+                    {actionLoading === "blog" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                    Generate Blog
+                  </Button>
+                )}
               </div>
-              <div className="flex items-center justify-between">
-                <span>Social Media</span>
-                <Badge variant="secondary">Phase 8</Badge>
+
+              <Separator />
+
+              {/* Review Request */}
+              <div className="flex items-center justify-between py-2">
+                <div className="flex items-center gap-3">
+                  <Star className="w-4 h-4 text-muted-foreground" />
+                  <div>
+                    <span className="text-sm font-medium">Review Request</span>
+                    {!job.customer_phone && !job.customer_email && (
+                      <p className="text-xs text-muted-foreground">No customer contact info</p>
+                    )}
+                  </div>
+                </div>
+                {job.review_requested ? (
+                  <Badge className="bg-green-100 text-green-800">
+                    <CheckCircle2 className="w-3 h-3 mr-1" /> Sent
+                  </Badge>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRequestReview}
+                    disabled={actionLoading === "review" || (!job.customer_phone && !job.customer_email)}
+                    className="gap-1"
+                  >
+                    {actionLoading === "review" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                    Send Request
+                  </Button>
+                )}
               </div>
-              <div className="flex items-center justify-between">
-                <span>Review Request</span>
-                <Badge variant="secondary">Phase 4</Badge>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>Neighborhood Campaign</span>
-                <Badge variant="secondary">Phase 7</Badge>
+
+              <Separator />
+
+              {/* Neighborhood Campaign */}
+              <div className="flex items-center justify-between py-2">
+                <div className="flex items-center gap-3">
+                  <Megaphone className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">Neighborhood Campaign</span>
+                </div>
+                {job.neighborhood_campaign_sent ? (
+                  <Badge className="bg-green-100 text-green-800">
+                    <CheckCircle2 className="w-3 h-3 mr-1" /> Created
+                  </Badge>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleCreateCampaign}
+                    disabled={actionLoading === "campaign"}
+                    className="gap-1"
+                  >
+                    {actionLoading === "campaign" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Megaphone className="w-3 h-3" />}
+                    Create
+                  </Button>
+                )}
               </div>
             </div>
           </CardContent>

@@ -79,7 +79,7 @@ export default function DashboardJobsPage() {
       ) : (
         <div className="space-y-3">
           {jobs.map((job) => (
-            <Link key={job.id} href={`/dashboard/jobs/${job.id}`}>
+            <Link key={job.id} href={`/jobs/${job.id}`}>
               <Card className="hover:bg-muted/50 transition-colors cursor-pointer">
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between">

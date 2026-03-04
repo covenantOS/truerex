@@ -14,6 +14,7 @@ import {
   Settings,
   Smartphone,
   Zap,
+  Camera,
 } from "lucide-react";
 
 const navItems = [
@@ -27,6 +28,15 @@ const navItems = [
   { href: "/settings", icon: Settings, label: "Settings" },
 ];
 
+// Bottom nav shows only the most important items on mobile
+const mobileNavItems = [
+  { href: "/dashboard", icon: LayoutDashboard, label: "Home", exact: true },
+  { href: "/jobs", icon: ClipboardList, label: "Jobs" },
+  { href: "/capture", icon: Camera, label: "Capture", special: true },
+  { href: "/reviews", icon: Star, label: "Reviews" },
+  { href: "/settings", icon: Settings, label: "More" },
+];
+
 export default function DashboardLayout({
   children,
 }: {
@@ -36,7 +46,7 @@ export default function DashboardLayout({
 
   return (
     <div className="min-h-screen flex">
-      {/* Sidebar — black */}
+      {/* Sidebar — desktop only */}
       <aside className="hidden md:flex w-64 flex-col bg-[#0A0A0A] text-white shrink-0">
         {/* Logo */}
         <div className="px-5 py-5 flex items-center gap-2.5">
@@ -85,9 +95,61 @@ export default function DashboardLayout({
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto bg-[#FAFAFA]">
-        <div className="p-8 max-w-6xl mx-auto">{children}</div>
+      <main className="flex-1 overflow-auto bg-[#FAFAFA] pb-20 md:pb-0">
+        {/* Mobile header */}
+        <div className="md:hidden flex items-center justify-between px-4 py-3 bg-[#0A0A0A] text-white">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-md bg-[#FFD700] flex items-center justify-center">
+              <Zap className="w-3.5 h-3.5 text-black" />
+            </div>
+            <span className="font-bold text-sm tracking-tight" style={{ fontFamily: 'var(--font-oswald)' }}>
+              TRUE<span className="text-[#FFD700]">REX</span>
+            </span>
+          </div>
+        </div>
+
+        <div className="p-4 md:p-8 max-w-6xl mx-auto">{children}</div>
       </main>
+
+      {/* Mobile bottom nav */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t z-50">
+        <div className="flex items-center justify-around py-1.5 px-2">
+          {mobileNavItems.map(({ href, icon: Icon, label, exact, special }) => {
+            const active = exact
+              ? pathname === href
+              : pathname === href || pathname.startsWith(href + "/");
+
+            if (special) {
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className="flex flex-col items-center gap-0.5 -mt-4"
+                >
+                  <div className="w-12 h-12 rounded-full bg-[#FFD700] flex items-center justify-center shadow-lg">
+                    <Icon className="w-5 h-5 text-black" />
+                  </div>
+                  <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
+                </Link>
+              );
+            }
+
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  "flex flex-col items-center gap-0.5 py-1.5 px-3 rounded-lg transition-colors",
+                  active ? "text-[#B8960C]" : "text-muted-foreground"
+                )}
+              >
+                <Icon className="w-5 h-5" />
+                <span className="text-[10px] font-medium">{label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 }
