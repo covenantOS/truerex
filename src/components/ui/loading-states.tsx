@@ -3,7 +3,9 @@
 import React from "react";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button, ButtonProps } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
+
+type ButtonProps = React.ComponentPropsWithoutRef<typeof Button>;
 
 // =============================================================================
 // Loading Spinner

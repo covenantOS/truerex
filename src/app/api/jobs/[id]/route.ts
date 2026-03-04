@@ -78,15 +78,12 @@ export async function PATCH(
       throw ApiError.badRequest("Request body cannot be empty");
     }
 
-    // Build update data with timestamp
+    // Build update data with timestamp, excluding immutable fields
+    const { id: _id, created_at: _ca, ...rest } = body;
     const updateData = {
-      ...body,
+      ...rest,
       updated_at: new Date().toISOString(),
     };
-
-    // Remove id from update if present (can't change primary key)
-    delete updateData.id;
-    delete updateData.created_at;
 
     const { data, error } = await supabase
       .from("jobs")

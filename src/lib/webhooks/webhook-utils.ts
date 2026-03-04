@@ -603,10 +603,9 @@ export function validateMakePayload(payload: unknown): { valid: boolean; error?:
  * Create a successful webhook response
  */
 export function webhookSuccess(data?: unknown): NextResponse {
-  return new NextResponse(JSON.stringify({
-    success: true,
-    ...(data && { data }),
-  }), {
+  const body: Record<string, unknown> = { success: true };
+  if (data) body.data = data;
+  return new NextResponse(JSON.stringify(body), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });

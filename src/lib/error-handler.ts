@@ -122,7 +122,7 @@ export function errorHandler(
     return new ApiError(
       HttpStatus.UNPROCESSABLE_ENTITY,
       "Validation failed",
-      err.errors
+      err.issues
     ).toResponse();
   }
 
@@ -237,7 +237,7 @@ export function validateBody<T extends z.ZodType>(
     return schema.parse(body);
   } catch (err) {
     if (err instanceof ZodError) {
-      throw ApiError.unprocessable("Invalid request body", err.errors);
+      throw ApiError.unprocessable("Invalid request body", err.issues);
     }
     throw err;
   }
@@ -270,7 +270,7 @@ export function validateRequired(
  * Auth helper - verifies user is authenticated
  * Throws ApiError with 401 if not authenticated
  */
-export async function requireAuth(supabase: ReturnType<typeof import("@/lib/supabase/server").createClient>): Promise<string> {
+export async function requireAuth(supabase: Awaited<ReturnType<typeof import("@/lib/supabase/server").createClient>>): Promise<string> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
