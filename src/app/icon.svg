@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <rect width="32" height="32" rx="6" fill="#FFD700"/>
+  <g fill="#000">
+    <!-- T-Rex head - angular geometric style -->
+    <!-- Skull top -->
+    <polygon points="8,10 24,10 24,14 22,14 22,12 8,12"/>
+    <!-- Jaw upper -->
+    <polygon points="8,12 22,12 22,16 20,16 20,14 8,14"/>
+    <!-- Jaw lower (open mouth) -->
+    <polygon points="10,17 22,17 22,21 20,21 20,19 10,19"/>
+    <!-- Eye -->
+    <rect x="18" y="11" width="3" height="2" rx="0.5" fill="#FFD700"/>
+    <!-- Teeth top -->
+    <polygon points="8,14 10,14 10,16 8,16" fill="#FFD700"/>
+    <polygon points="12,14 14,14 14,16 12,16" fill="#FFD700"/>
+    <polygon points="16,14 18,14 18,16 16,16" fill="#FFD700"/>
+    <!-- Teeth bottom -->
+    <polygon points="12,17 14,17 14,15.5 12,15.5" fill="#FFD700"/>
+    <polygon points="16,17 18,17 18,15.5 16,15.5" fill="#FFD700"/>
+  </g>
+</svg>
