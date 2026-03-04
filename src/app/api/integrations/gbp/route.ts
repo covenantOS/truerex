@@ -1,23 +1,45 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getGBPAuthUrl } from "@/lib/integrations/gbp";
+import {
+  ApiError,
+  HttpStatus,
+  tryCatch,
+  requireAuth,
+} from "@/error-handler";
 
 /**
- * GET: Start GBP OAuth flow — returns the auth URL
+ * GET /api/integrations/gbp
+ * Start GBP OAuth flow — returns the auth URL
  */
-export async function GET() {
-  const supabase = await createClient();
+export async function GET(request: NextRequest) {
+  return tryCatch(request, async (req) => {
+    const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+    // Verify user is authenticated
+    const userId = await requireAuth(supabase);
 
-  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL}/api/integrations/gbp/callback`;
-  const state = user.id; // Simple state, enhance with CSRF in production
+    // Validate environment configuration
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+    if (!appUrl) {
+      console.error("NEXT_PUBLIC_APP_URL is not configured");
+      throw ApiError.internal("Server configuration error");
+    }
 
-  const authUrl = getGBPAuthUrl(redirectUri, state);
-  return NextResponse.json({ authUrl });
+    const redirectUri = `${appUrl}/api/integrations/gbp/callback`;
+    
+    // Generate state with user ID for CSRF protection
+    const state = Buffer.from(JSON.stringify({ 
+      userId, 
+      timestamp: Date.now() 
+    })).toString("base64");
+
+    try {
+      const authUrl = getGBPAuthUrl(redirectUri, state);
+      return NextResponse.json({ authUrl });
+    } catch (err) {
+      console.error("Error generating GBP auth URL:", err);
+      throw ApiError.internal("Failed to generate authentication URL");
+    }
+  });
 }

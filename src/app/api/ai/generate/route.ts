@@ -5,50 +5,87 @@ import { buildReviewResponsePrompt } from "@/lib/ai/prompts/review-response";
 import { buildBlogPostPrompt } from "@/lib/ai/prompts/blog-post";
 import { buildSocialPostPrompt } from "@/lib/ai/prompts/social-post";
 import { buildNeighborhoodPrompt } from "@/lib/ai/prompts/neighborhood";
+import {
+  ApiError,
+  HttpStatus,
+  tryCatch,
+  validateRequired,
+} from "@/error-handler";
 
 type ContentType = "review_response" | "blog_post" | "social_post" | "neighborhood";
 
+const VALID_CONTENT_TYPES: ContentType[] = [
+  "review_response",
+  "blog_post",
+  "social_post",
+  "neighborhood",
+];
+
+/**
+ * POST /api/ai/generate
+ * Generate AI content for various content types
+ */
 export async function POST(request: NextRequest) {
-  const supabase = await createClient();
-  const body = await request.json();
+  return tryCatch(request, async (req) => {
+    // Parse and validate request body
+    let body: Record<string, unknown>;
+    try {
+      body = await req.json();
+    } catch {
+      throw ApiError.badRequest("Invalid JSON in request body");
+    }
 
-  const { type, ...data } = body as { type: ContentType; [key: string]: unknown };
+    // Validate required 'type' field
+    const { type, ...data } = body as { type: ContentType; [key: string]: unknown };
+    
+    if (!type) {
+      throw ApiError.badRequest("Missing required field: 'type'");
+    }
 
-  if (!type) {
-    return NextResponse.json({ error: "Missing 'type' field" }, { status: 400 });
-  }
+    // Validate content type
+    if (!VALID_CONTENT_TYPES.includes(type)) {
+      throw ApiError.badRequest(
+        `Invalid 'type'. Must be one of: ${VALID_CONTENT_TYPES.join(", ")}`
+      );
+    }
 
-  try {
+    // Route to appropriate handler
     switch (type) {
       case "review_response":
-        return handleReviewResponse(supabase, data);
+        return handleReviewResponse(req, data);
       case "blog_post":
-        return handleBlogPost(supabase, data);
+        return handleBlogPost(req, data);
       case "social_post":
-        return handleSocialPost(supabase, data);
+        return handleSocialPost(req, data);
       case "neighborhood":
-        return handleNeighborhood(supabase, data);
+        return handleNeighborhood(req, data);
       default:
-        return NextResponse.json({ error: `Unknown type: ${type}` }, { status: 400 });
+        // This should never happen due to validation above
+        throw ApiError.badRequest(`Unknown type: ${type}`);
     }
-  } catch (err) {
-    console.error(`AI generation (${type}) failed:`, err);
-    return NextResponse.json(
-      { error: "AI generation failed" },
-      { status: 500 }
-    );
-  }
+  });
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getBusinessVoice(supabase: any, businessId: string) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("businesses")
     .select("*")
     .eq("id", businessId)
     .single();
 
-  if (!data) throw new Error("Business not found");
+  if (error) {
+    if (error.code === "PGRST116") {
+      // PGRST116 = "Could not find a row"
+      throw ApiError.notFound("Business", businessId);
+    }
+    console.error("Error fetching business:", error);
+    throw ApiError.internal("Failed to fetch business data");
+  }
+
+  if (!data) {
+    throw ApiError.notFound("Business", businessId);
+  }
 
   return {
     voice_tone: data.voice_tone || "friendly-professional",
@@ -64,7 +101,12 @@ async function getBusinessVoice(supabase: any, businessId: string) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function handleReviewResponse(supabase: any, data: Record<string, unknown>) {
+async function handleReviewResponse(request: NextRequest, data: Record<string, unknown>) {
+  const supabase = await createClient();
+  
+  // Validate required fields
+  validateRequired(data, ["business_id", "review_id"]);
+
   const { business_id, review_id } = data as {
     business_id: string;
     review_id: string;
@@ -72,14 +114,22 @@ async function handleReviewResponse(supabase: any, data: Record<string, unknown>
 
   const voice = await getBusinessVoice(supabase, business_id);
 
-  const { data: review } = await supabase
+  const { data: review, error: reviewError } = await supabase
     .from("reviews")
     .select("*")
     .eq("id", review_id)
     .single();
 
+  if (reviewError) {
+    if (reviewError.code === "PGRST116") {
+      throw ApiError.notFound("Review", review_id);
+    }
+    console.error("Error fetching review:", reviewError);
+    throw ApiError.internal("Failed to fetch review");
+  }
+
   if (!review) {
-    return NextResponse.json({ error: "Review not found" }, { status: 404 });
+    throw ApiError.notFound("Review", review_id);
   }
 
   // Get past responses to avoid repetition
@@ -102,13 +152,19 @@ async function handleReviewResponse(supabase: any, data: Record<string, unknown>
     pastResponses || []
   );
 
-  const response = await generateCompletion(messages, {
-    temperature: 0.75,
-    maxTokens: 256,
-  });
+  let response: string;
+  try {
+    response = await generateCompletion(messages, {
+      temperature: 0.75,
+      maxTokens: 256,
+    });
+  } catch (err) {
+    console.error("AI generation failed:", err);
+    throw ApiError.serviceUnavailable("AI service temporarily unavailable");
+  }
 
   // Save draft
-  await supabase
+  const { error: updateError } = await supabase
     .from("reviews")
     .update({
       ai_draft_response: response,
@@ -116,11 +172,20 @@ async function handleReviewResponse(supabase: any, data: Record<string, unknown>
     })
     .eq("id", review_id);
 
+  if (updateError) {
+    console.error("Error saving draft response:", updateError);
+    // Don't fail the request, just log the error
+  }
+
   return NextResponse.json({ response });
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function handleBlogPost(supabase: any, data: Record<string, unknown>) {
+async function handleBlogPost(request: NextRequest, data: Record<string, unknown>) {
+  const supabase = await createClient();
+  
+  validateRequired(data, ["business_id", "job_id"]);
+
   const { business_id, job_id } = data as {
     business_id: string;
     job_id: string;
@@ -128,14 +193,22 @@ async function handleBlogPost(supabase: any, data: Record<string, unknown>) {
 
   const voice = await getBusinessVoice(supabase, business_id);
 
-  const { data: job } = await supabase
+  const { data: job, error: jobError } = await supabase
     .from("jobs")
     .select("*, job_photos(photo_type)")
     .eq("id", job_id)
     .single();
 
+  if (jobError) {
+    if (jobError.code === "PGRST116") {
+      throw ApiError.notFound("Job", job_id);
+    }
+    console.error("Error fetching job:", jobError);
+    throw ApiError.internal("Failed to fetch job data");
+  }
+
   if (!job) {
-    return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    throw ApiError.notFound("Job", job_id);
   }
 
   const photoTypes = (job.job_photos || []).map(
@@ -157,16 +230,23 @@ async function handleBlogPost(supabase: any, data: Record<string, unknown>) {
     job.ai_story || null
   );
 
-  const raw = await generateCompletion(messages, {
-    temperature: 0.7,
-    maxTokens: 1024,
-  });
+  let raw: string;
+  try {
+    raw = await generateCompletion(messages, {
+      temperature: 0.7,
+      maxTokens: 1024,
+    });
+  } catch (err) {
+    console.error("AI blog generation failed:", err);
+    throw ApiError.serviceUnavailable("AI service temporarily unavailable");
+  }
 
   // Try parsing JSON response
-  let result;
+  let result: { title: string; body: string; seo_keywords: string[] };
   try {
     result = JSON.parse(raw);
   } catch {
+    // If parsing fails, treat entire response as body
     result = { title: "", body: raw, seo_keywords: [] };
   }
 
@@ -174,23 +254,43 @@ async function handleBlogPost(supabase: any, data: Record<string, unknown>) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function handleSocialPost(supabase: any, data: Record<string, unknown>) {
+async function handleSocialPost(request: NextRequest, data: Record<string, unknown>) {
+  const supabase = await createClient();
+  
+  validateRequired(data, ["business_id", "job_id"]);
+
   const { business_id, job_id, platform } = data as {
     business_id: string;
     job_id: string;
-    platform: "facebook" | "instagram" | "nextdoor";
+    platform?: "facebook" | "instagram" | "nextdoor";
   };
+
+  // Validate platform if provided
+  const validPlatforms = ["facebook", "instagram", "nextdoor"] as const;
+  if (platform && !validPlatforms.includes(platform)) {
+    throw ApiError.badRequest(
+      `Invalid platform. Must be one of: ${validPlatforms.join(", ")}`
+    );
+  }
 
   const voice = await getBusinessVoice(supabase, business_id);
 
-  const { data: job } = await supabase
+  const { data: job, error: jobError } = await supabase
     .from("jobs")
     .select("*")
     .eq("id", job_id)
     .single();
 
+  if (jobError) {
+    if (jobError.code === "PGRST116") {
+      throw ApiError.notFound("Job", job_id);
+    }
+    console.error("Error fetching job:", jobError);
+    throw ApiError.internal("Failed to fetch job data");
+  }
+
   if (!job) {
-    return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    throw ApiError.notFound("Job", job_id);
   }
 
   const messages = buildSocialPostPrompt(
@@ -202,19 +302,37 @@ async function handleSocialPost(supabase: any, data: Record<string, unknown>) {
       raw_notes: job.raw_notes || "",
       ai_story: job.ai_story,
     },
-    platform
+    platform || "facebook"
   );
 
-  const post = await generateCompletion(messages, {
-    temperature: 0.8,
-    maxTokens: 512,
-  });
+  let post: string;
+  try {
+    post = await generateCompletion(messages, {
+      temperature: 0.8,
+      maxTokens: 512,
+    });
+  } catch (err) {
+    console.error("AI social post generation failed:", err);
+    throw ApiError.serviceUnavailable("AI service temporarily unavailable");
+  }
 
-  return NextResponse.json({ post, platform });
+  return NextResponse.json({ post, platform: platform || "facebook" });
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function handleNeighborhood(supabase: any, data: Record<string, unknown>) {
+async function handleNeighborhood(request: NextRequest, data: Record<string, unknown>) {
+  const supabase = await createClient();
+  
+  // Validate required fields
+  validateRequired(data, [
+    "business_id",
+    "campaign_type",
+    "channel",
+    "service_type",
+    "job_address",
+    "job_city",
+  ]);
+
   const {
     business_id,
     campaign_type,
@@ -239,6 +357,22 @@ async function handleNeighborhood(supabase: any, data: Record<string, unknown>) 
     owner_name?: string;
   };
 
+  // Validate enum values
+  const validCampaignTypes = ["pre_job", "post_job"];
+  const validChannels = ["sms", "email", "mailer"] as const;
+
+  if (!validCampaignTypes.includes(campaign_type)) {
+    throw ApiError.badRequest(
+      `Invalid campaign_type. Must be one of: ${validCampaignTypes.join(", ")}`
+    );
+  }
+
+  if (!validChannels.includes(channel)) {
+    throw ApiError.badRequest(
+      `Invalid channel. Must be one of: ${validChannels.join(", ")}`
+    );
+  }
+
   const voice = await getBusinessVoice(supabase, business_id);
 
   const messages = buildNeighborhoodPrompt(
@@ -261,10 +395,16 @@ async function handleNeighborhood(supabase: any, data: Record<string, unknown>) 
     }
   );
 
-  const message = await generateCompletion(messages, {
-    temperature: 0.75,
-    maxTokens: channel === "sms" ? 128 : 512,
-  });
+  let message: string;
+  try {
+    message = await generateCompletion(messages, {
+      temperature: 0.75,
+      maxTokens: channel === "sms" ? 128 : 512,
+    });
+  } catch (err) {
+    console.error("AI neighborhood message generation failed:", err);
+    throw ApiError.serviceUnavailable("AI service temporarily unavailable");
+  }
 
   return NextResponse.json({ message, channel, campaign_type });
 }
